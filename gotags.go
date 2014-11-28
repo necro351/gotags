@@ -39,24 +39,51 @@ func parseFile(filePath string, info os.FileInfo, err error) error {
 
 	fset := token.NewFileSet() // positions are relative to fset
 
-	// Parse the file containing this very example
-	// but stop after processing the imports.
 	f, err := parser.ParseFile(fset, filePath, nil, 0)
-	if err != nil {
-		return err
+	if err != nil && f == nil {
+		return nil
 	}
 
-	// Inspect the AST and print all identifiers and literals.
+	// Inspect the AST and print all identifier declarations as tags
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
-		case *ast.Ident:
-			if x.Obj != nil && x.Obj.Decl != nil {
-				pos := fset.Position(x.NamePos)
-				tags = append(tags, fmt.Sprintf("%s\t%s\t:%d", x.Name, pos.Filename, pos.Line))
+		case *ast.File:
+			handleIdent(fset, x.Name, false)
+		case *ast.FuncDecl:
+			// Do not descend into function bodies
+			handleIdent(fset, x.Name, true)
+			return false
+		case *ast.ValueSpec:
+			// Do not descend into the value portion of vars
+			for _, name := range x.Names {
+				// Do not descend into function bodies
+				handleIdent(fset, name, true)
 			}
+			return false
+		default:
+			// But go everywhere else
+			handleIdent(fset, n, true)
 		}
 		return true
 	})
 
 	return nil
+}
+
+func handleIdent(fset *token.FileSet, n interface{}, reqdecl bool) {
+	switch x := n.(type) {
+	case *ast.Ident:
+		if !reqdecl || (x.Obj != nil && x.Obj.Decl != nil && expectedDecl(x.Obj.Decl)) {
+			pos := fset.Position(x.NamePos)
+			tags = append(tags, fmt.Sprintf("%s\t%s\t:%d", x.Name, pos.Filename, pos.Line))
+		}
+	}
+}
+
+func expectedDecl(decl interface{}) bool {
+	switch decl.(type) {
+	case *ast.TypeSpec, *ast.Field, *ast.FuncDecl, *ast.ValueSpec:
+		return true
+	}
+	return false
 }
